@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import type { Agent, AgentSpec, DebateState, Message, SSEEvent } from "@/lib/types";
+import type { Agent, AgentSpec, DebateState, Message, SSEEvent, UploadedFile } from "@/lib/types";
 
 const initialState: DebateState = {
   question: "",
@@ -111,7 +111,7 @@ export function useDebate() {
   const abortRef = useRef<AbortController | null>(null);
 
   const startDebate = useCallback(
-    async (question: string, agentSpecs?: AgentSpec[]) => {
+    async (question: string, agentSpecs?: AgentSpec[], uploadedFiles?: UploadedFile[]) => {
       // Cancel any existing debate
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -123,11 +123,16 @@ export function useDebate() {
         status: "generating_agents",
       });
 
+      // Build file context string
+      const fileContext = uploadedFiles && uploadedFiles.length > 0
+        ? uploadedFiles.map((f) => `--- ${f.name} ---\n${f.content}`).join("\n\n")
+        : undefined;
+
       try {
         const response = await fetch("/api/debate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ question, agents: agentSpecs }),
+          body: JSON.stringify({ question, agents: agentSpecs, fileContext }),
           signal: controller.signal,
         });
 

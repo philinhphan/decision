@@ -12,6 +12,13 @@ export interface AgentSpec {
   description: string;
 }
 
+export interface UploadedFile {
+  name: string;
+  content: string;
+  type: string;
+  size: number;
+}
+
 export type StanceLevel = 1 | 2 | 3 | 4 | 5 | 6;
 
 export const STANCE_LABELS: Record<StanceLevel, string> = {

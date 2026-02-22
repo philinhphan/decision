@@ -79,21 +79,22 @@ export function buildAgentDebaterPrompt(
   totalRounds: number,
   priorMessages: { agentName: string; content: string; round: number }[],
   lastMessage?: { agentName: string; content: string } | null,
-  webContext?: string
+  webContext?: string,
+  fileContext?: string
 ): { system: string; user: string } {
   const roundContext =
     round === 1
       ? "Opening — state your position clearly."
       : round === totalRounds
-      ? "Final word — one crisp closing sentence, no new arguments."
-      : "React to what was just said. Push back or build on it.";
+        ? "Final word — one crisp closing sentence, no new arguments."
+        : "React to what was just said. Push back or build on it.";
 
   const historyMessages = (lastMessage ? priorMessages.slice(0, -1) : priorMessages).slice(-6);
   const priorContext =
     historyMessages.length > 0
       ? `\n\nRecent exchange:\n${historyMessages
-          .map((m) => `${m.agentName}: ${m.content.slice(0, 150)}`)
-          .join("\n")}`
+        .map((m) => `${m.agentName}: ${m.content.slice(0, 150)}`)
+        .join("\n")}`
       : "";
 
   const lastMessageBlock =
@@ -105,11 +106,15 @@ export function buildAgentDebaterPrompt(
     ? `\n\nBackground research:\n${webContext.slice(0, 800)}`
     : "";
 
+  const fileContextBlock = fileContext
+    ? `\n\nUser-provided documents:\n${fileContext.slice(0, 3000)}`
+    : "";
+
   return {
     system: `You are ${agent.name}, ${agent.role}. ${agent.perspective}
 
 This is a live debate. Keep it short and sharp: 2-3 sentences maximum. Be direct, conversational, and combative when warranted. No lengthy explanations — one clear point per turn.`,
-    user: `Debate question: "${question}"${webContextBlock}
+    user: `Debate question: "${question}"${webContextBlock}${fileContextBlock}
 
 Turn ${round} of ${totalRounds}. ${roundContext}${priorContext}${lastMessageBlock}
 
@@ -119,15 +124,20 @@ CRITICAL: Start with [STANCE: X] where X is 1-6 (1=Strongly Disagree, 6=Strongly
 
 export function buildSummarizerPrompt(
   question: string,
-  messages: { agentName: string; content: string; round: number }[]
+  messages: { agentName: string; content: string; round: number }[],
+  fileContext?: string
 ): { system: string; user: string } {
   const transcript = messages
     .map((m) => `[Round ${m.round}] ${m.agentName}:\n${m.content}`)
     .join("\n\n---\n\n");
 
+  const fileBlock = fileContext
+    ? `\n\nUser-provided reference documents:\n${fileContext.slice(0, 3000)}`
+    : "";
+
   return {
     system: `You are a neutral, brilliant analyst who synthesizes complex debates into clear conclusions. You identify consensus, key disagreements, and the weight of evidence to reach a definitive verdict.`,
-    user: `Question: "${question}"
+    user: `Question: "${question}"${fileBlock}
 
 Full debate transcript:
 ${transcript}

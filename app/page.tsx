@@ -6,13 +6,15 @@ import { ArrowRight, Loader2, RotateCcw, Plus, X, Edit2, Check } from "lucide-re
 import { useDebate } from "@/hooks/useDebate";
 import { SpectrumView } from "@/components/debate/SpectrumView";
 import { SummaryPanel } from "@/components/debate/SummaryPanel";
+import { FileUploadZone } from "@/components/home/FileUploadZone";
 import { SUPREME_COURT_JUSTICES } from "@/lib/presets";
-import type { AgentSpec } from "@/lib/types";
+import type { AgentSpec, UploadedFile } from "@/lib/types";
 
 export default function Home() {
   const [question, setQuestion] = useState("");
   const [agentSpecs, setAgentSpecs] = useState<AgentSpec[]>(SUPREME_COURT_JUSTICES);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const { state, startDebate, reset } = useDebate();
 
   const isActive = state.status !== "idle" && state.status !== "error";
@@ -20,12 +22,13 @@ export default function Home() {
 
   const handleSubmit = () => {
     if (!question.trim() || isLoading || agentSpecs.length === 0) return;
-    startDebate(question.trim(), agentSpecs);
+    startDebate(question.trim(), agentSpecs, uploadedFiles);
   };
 
   const handleReset = () => {
     reset();
     setQuestion("");
+    setUploadedFiles([]);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -106,6 +109,18 @@ export default function Home() {
                     )}
                   </button>
                 </div>
+              </div>
+
+              {/* File Upload */}
+              <div className="space-y-2 mb-8">
+                <p className="text-center text-xs tracking-[0.2em] text-gray-500">
+                  EVIDENCE & DOCUMENTS
+                </p>
+                <FileUploadZone
+                  files={uploadedFiles}
+                  onFilesChange={setUploadedFiles}
+                  disabled={isActive}
+                />
               </div>
 
               {/* Divider */}

@@ -39,7 +39,7 @@ function parseStance(content: string): { cleanContent: string; stance?: StanceLe
 }
 
 export async function POST(req: Request) {
-  const { question, agents: agentSpecs }: { question: string; agents?: AgentSpec[] } =
+  const { question, agents: agentSpecs, fileContext }: { question: string; agents?: AgentSpec[]; fileContext?: string } =
     await req.json();
 
   if (!question?.trim()) {
@@ -96,10 +96,10 @@ export async function POST(req: Request) {
             const lastMsg =
               allMessages.length > 0
                 ? (() => {
-                    const last = allMessages[allMessages.length - 1];
-                    const lastAgent = agents.find((a) => a.id === last.agentId);
-                    return { agentName: lastAgent?.name ?? "Unknown", content: last.content };
-                  })()
+                  const last = allMessages[allMessages.length - 1];
+                  const lastAgent = agents.find((a) => a.id === last.agentId);
+                  return { agentName: lastAgent?.name ?? "Unknown", content: last.content };
+                })()
                 : null;
 
             const { system, user } = buildAgentDebaterPrompt(
@@ -109,7 +109,8 @@ export async function POST(req: Request) {
               totalRounds,
               priorMessages,
               lastMsg,
-              webContext
+              webContext,
+              fileContext
             );
 
             let content = "";
@@ -154,7 +155,8 @@ export async function POST(req: Request) {
 
         const { system: sumSystem, user: sumUser } = buildSummarizerPrompt(
           question,
-          summaryContext
+          summaryContext,
+          fileContext
         );
 
         let summaryText = "";
