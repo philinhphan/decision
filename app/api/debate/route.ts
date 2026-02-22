@@ -98,6 +98,8 @@ export async function POST(req: Request) {
 
         // Step 3: Run debate rounds — all agents think in parallel per round
         for (let round = 1; round <= totalRounds; round++) {
+          // Ensure web context is available before rounds 2+ (round 1 proceeds immediately)
+          if (round > 1) await webContextReady;
           send({ type: "round_start", round, totalRounds });
 
           // Snapshot context at the start of this round (each agent sees the same prior state)
