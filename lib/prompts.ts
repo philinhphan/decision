@@ -77,41 +77,38 @@ export function buildAgentDebaterPrompt(
   question: string,
   round: number,
   totalRounds: number,
-  priorMessages: { agentName: string; content: string; round: number }[]
+  priorMessages: { agentName: string; content: string; round: number }[],
+  lastMessage?: { agentName: string; content: string } | null
 ): { system: string; user: string } {
   const roundContext =
     round === 1
-      ? "This is the opening round. Present your core argument."
+      ? "Opening — state your position clearly."
       : round === totalRounds
-      ? "This is the final round. Synthesize prior discussion and make your closing argument."
-      : "This is the middle round. Respond to other agents' arguments and develop your position.";
+      ? "Final word — one crisp closing sentence, no new arguments."
+      : "React to what was just said. Push back or build on it.";
 
+  const historyMessages = (lastMessage ? priorMessages.slice(0, -1) : priorMessages).slice(-6);
   const priorContext =
-    priorMessages.length > 0
-      ? `\n\nPrior debate messages:\n${priorMessages
-          .map((m) => `[Round ${m.round}] ${m.agentName}: ${m.content.slice(0, 500)}...`)
-          .join("\n\n")}`
+    historyMessages.length > 0
+      ? `\n\nRecent exchange:\n${historyMessages
+          .map((m) => `${m.agentName}: ${m.content.slice(0, 150)}`)
+          .join("\n")}`
+      : "";
+
+  const lastMessageBlock =
+    lastMessage && round > 1
+      ? `\n\n${lastMessage.agentName} just said: "${lastMessage.content.slice(0, 200)}"\n\nRespond to them directly — name them, then make your point.`
       : "";
 
   return {
-    system: `You are ${agent.name}, ${agent.role}.
+    system: `You are ${agent.name}, ${agent.role}. ${agent.perspective}
 
-Your perspective: ${agent.perspective}
+This is a live debate. Keep it short and sharp: 2-3 sentences maximum. Be direct, conversational, and combative when warranted. No lengthy explanations — one clear point per turn.`,
+    user: `Debate question: "${question}"
 
-You have access to a web search tool. Use it proactively when your argument benefits from current data, recent statistics, or specific facts you are unsure about. You may search multiple times. Incorporate results naturally with attribution (e.g., "According to [source]...").
+Turn ${round} of ${totalRounds}. ${roundContext}${priorContext}${lastMessageBlock}
 
-Stay fully in character. Be intellectually rigorous, specific, and persuasive. Engage directly with the question and, in later rounds, with other agents' arguments. Write 3-5 substantive paragraphs.
-
-CRITICAL: You MUST start your response with your stance on a single line in this exact format:
-[STANCE: X]
-where X is a number 1-6: 1=Strongly Disagree, 2=Disagree, 3=Somewhat Disagree, 4=Somewhat Agree, 5=Agree, 6=Strongly Agree
-
-Then write your argument.`,
-    user: `Question under debate: "${question}"
-
-Round ${round} of ${totalRounds}. ${roundContext}${priorContext}
-
-Start with [STANCE: X] then deliver your argument:`,
+CRITICAL: Start with [STANCE: X] where X is 1-6 (1=Strongly Disagree, 6=Strongly Agree). Then your response:`,
   };
 }
 

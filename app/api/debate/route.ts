@@ -62,10 +62,10 @@ export async function POST(req: Request) {
         const agents: Agent[] = await generateAgents(question, agentSpecs);
         send({ type: "agents_ready", agents });
 
-        const totalRounds = 3;
+        const totalRounds = 8;
         const allMessages: Message[] = [];
 
-        // Step 2: Run 3 rounds
+        // Step 2: Run debate rounds
         for (let round = 1; round <= totalRounds; round++) {
           send({ type: "round_start", round, totalRounds });
 
@@ -83,12 +83,22 @@ export async function POST(req: Request) {
               };
             });
 
+            const lastMsg =
+              allMessages.length > 0
+                ? (() => {
+                    const last = allMessages[allMessages.length - 1];
+                    const lastAgent = agents.find((a) => a.id === last.agentId);
+                    return { agentName: lastAgent?.name ?? "Unknown", content: last.content };
+                  })()
+                : null;
+
             const { system, user } = buildAgentDebaterPrompt(
               agent,
               question,
               round,
               totalRounds,
-              priorMessages
+              priorMessages,
+              lastMsg
             );
 
             let content = "";
@@ -97,7 +107,7 @@ export async function POST(req: Request) {
               model,
               system,
               prompt: user,
-              maxOutputTokens: 600,
+maxOutputTokens: 600,
               tools: { webSearch: webSearchTool },
               stopWhen: stepCountIs(5),
             });
