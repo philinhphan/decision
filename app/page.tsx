@@ -12,6 +12,7 @@ import { FileUploadZone } from "@/components/home/FileUploadZone";
 import { SUPREME_COURT_JUSTICES } from "@/lib/presets";
 import type { AgentSpec, UploadedFile } from "@/lib/types";
 import justicesData from "@/justices.json";
+import { PaywallModal } from "@/components/PaywallModal";
 
 export default function Home() {
   const [question, setQuestion] = useState("");
@@ -19,6 +20,11 @@ export default function Home() {
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const { state, startDebate, reset } = useDebate();
+  const [debateCount, setDebateCount] = useState(0);
+  const [debateCredit, setDebateCredit] = useState<string | null>(null);
+  const [showPaywall, setShowPaywall] = useState(false);
+  const [paymentVerifying, setPaymentVerifying] = useState(false);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
   const tts = useTTS();
   const completedMessageIdsRef = useRef(new Set<string>());
   // Keep stable refs to tts functions so effects don't re-fire when tts object identity changes
@@ -28,6 +34,38 @@ export default function Home() {
   useEffect(() => { ttsEnqueueRef.current = tts.enqueue; }, [tts.enqueue]);
   useEffect(() => { ttsPrefetchRef.current = tts.prefetch; }, [tts.prefetch]);
   useEffect(() => { ttsStopRef.current = tts.stop; }, [tts.stop]);
+
+  // Load debate count and credit from localStorage on mount
+  useEffect(() => {
+    const count = parseInt(localStorage.getItem("debateCount") ?? "0", 10);
+    setDebateCount(isNaN(count) ? 0 : count);
+    const credit = localStorage.getItem("debateCredit");
+    if (credit) setDebateCredit(credit);
+  }, []);
+
+  // Handle Stripe redirect with ?session_id
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get("session_id");
+    if (!sessionId) return;
+    window.history.replaceState({}, "", window.location.pathname);
+    setPaymentVerifying(true);
+    fetch(`/api/stripe/verify?session_id=${encodeURIComponent(sessionId)}`)
+      .then((r) => r.json())
+      .then((data: { ok?: boolean; error?: string }) => {
+        if (data.ok) {
+          localStorage.setItem("debateCredit", sessionId);
+          setDebateCredit(sessionId);
+        } else {
+          setPaymentError(data.error ?? "Payment verification failed");
+        }
+        setPaymentVerifying(false);
+      })
+      .catch(() => {
+        setPaymentError("Network error during verification");
+        setPaymentVerifying(false);
+      });
+  }, []);
 
   // Build a name → justice info lookup from justices.json
   const justiceInfoMap = useMemo(() => {
@@ -43,7 +81,18 @@ export default function Home() {
 
   const handleSubmit = () => {
     if (!question.trim() || isLoading || agentSpecs.length === 0) return;
-    startDebate(question.trim(), agentSpecs, uploadedFiles);
+    const isFree = debateCount < 3;
+    const hasCredit = !!debateCredit;
+    if (!isFree && !hasCredit) { setShowPaywall(true); return; }
+
+    const newCount = debateCount + 1;
+    setDebateCount(newCount);
+    localStorage.setItem("debateCount", String(newCount));
+
+    const creditToSend = debateCredit ?? undefined;
+    if (debateCredit) { localStorage.removeItem("debateCredit"); setDebateCredit(null); }
+
+    startDebate(question.trim(), agentSpecs, uploadedFiles, creditToSend);
   };
 
   const handleReset = () => {
@@ -103,6 +152,26 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-white text-black">
+      {paymentVerifying && (
+        <div className="fixed top-0 inset-x-0 z-50 bg-black text-white text-xs text-center py-2 tracking-[0.1em]">
+          Verifying payment...
+        </div>
+      )}
+      {paymentError && (
+        <div className="fixed top-0 inset-x-0 z-50 bg-rose-600 text-white text-xs text-center py-2">
+          <span>{paymentError}</span>{" "}
+          &mdash;{" "}
+          <button onClick={() => setPaymentError(null)} className="underline">
+            Dismiss
+          </button>
+        </div>
+      )}
+      {debateCredit && !paymentVerifying && (
+        <div className="fixed top-0 inset-x-0 z-50 bg-black text-white text-xs text-center py-2 tracking-[0.1em]">
+          1 debate credit ready
+        </div>
+      )}
+      {showPaywall && <PaywallModal onClose={() => setShowPaywall(false)} />}
       <AnimatePresence mode="wait">
         {!isActive ? (
           <motion.div

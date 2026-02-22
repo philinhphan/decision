@@ -14,6 +14,8 @@ import { performWebSearch } from "@/lib/tools";
 
 export const maxDuration = 300;
 
+const usedSessionIds = new Set<string>();
+
 function sseEvent(event: SSEEvent): string {
   return `data: ${JSON.stringify(event)}\n\n`;
 }
@@ -68,6 +70,26 @@ export async function POST(req: Request) {
     return new Response(JSON.stringify({ error: "Question is required" }), {
       status: 400,
     });
+  }
+
+  const creditHeader = req.headers.get("X-Debate-Credit");
+  if (creditHeader) {
+    if (!creditHeader.startsWith("cs_")) {
+      return new Response(JSON.stringify({ error: "Invalid credit token" }), { status: 402 });
+    }
+    if (usedSessionIds.has(creditHeader)) {
+      return new Response(JSON.stringify({ error: "This credit has already been used" }), { status: 402 });
+    }
+    try {
+      const { stripe } = await import("@/lib/stripe");
+      const session = await stripe.checkout.sessions.retrieve(creditHeader);
+      if (session.payment_status !== "paid") {
+        return new Response(JSON.stringify({ error: "Payment not verified" }), { status: 402 });
+      }
+    } catch {
+      return new Response(JSON.stringify({ error: "Failed to verify payment" }), { status: 402 });
+    }
+    usedSessionIds.add(creditHeader);
   }
 
   const encoder = new TextEncoder();

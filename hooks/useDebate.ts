@@ -136,7 +136,7 @@ export function useDebate() {
   const abortRef = useRef<AbortController | null>(null);
 
   const startDebate = useCallback(
-    async (question: string, agentSpecs?: AgentSpec[], uploadedFiles?: UploadedFile[]) => {
+    async (question: string, agentSpecs?: AgentSpec[], uploadedFiles?: UploadedFile[], credit?: string) => {
       // Cancel any existing debate
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -154,9 +154,11 @@ export function useDebate() {
         : undefined;
 
       try {
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (credit) headers["X-Debate-Credit"] = credit;
         const response = await fetch("/api/debate", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({ question, agents: agentSpecs, fileContext }),
           signal: controller.signal,
         });
