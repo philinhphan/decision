@@ -144,11 +144,11 @@ export function SpectrumView({ agents, messages, question, currentRound, activeA
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: 5, scale: 0.95 }}
                       transition={{ duration: 0.2 }}
-                      className="absolute bottom-full mb-2 w-52 p-3 rounded-xl text-xs leading-relaxed shadow-lg border bg-black text-white border-black z-20"
+                      className="absolute bottom-full mb-2 w-52 p-3 rounded-xl text-xs leading-relaxed shadow-lg border bg-white text-black border-gray-200 z-20"
                     >
                       {truncatedMessage}
                       {/* Speech bubble tail */}
-                      <div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-l-[8px] border-r-[8px] border-t-[8px] border-l-transparent border-r-transparent border-t-black" />
+                      <div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-l-[8px] border-r-[8px] border-t-[8px] border-l-transparent border-r-transparent border-t-white" />
                     </motion.div>
                   )}
                 </AnimatePresence>
