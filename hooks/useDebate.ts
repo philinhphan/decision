@@ -14,6 +14,7 @@ const initialState: DebateState = {
   decision: "",
   confidence: 0,
   keyArguments: [],
+  activeSearchMessageId: undefined,
 };
 
 function applyEvent(state: DebateState, event: SSEEvent): DebateState {
@@ -52,7 +53,18 @@ function applyEvent(state: DebateState, event: SSEEvent): DebateState {
     }
 
     case "agent_done":
-      return { ...state, activeAgentId: undefined, activeMessageId: undefined };
+      return {
+        ...state,
+        activeAgentId: undefined,
+        activeMessageId: undefined,
+        activeSearchMessageId: undefined,
+      };
+
+    case "agent_search_start":
+      return { ...state, activeSearchMessageId: event.messageId };
+
+    case "agent_search_done":
+      return { ...state, activeSearchMessageId: undefined };
 
     case "summary_token":
       return { ...state, status: "summarizing", summary: state.summary + event.token };

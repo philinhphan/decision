@@ -98,6 +98,8 @@ export function buildAgentDebaterPrompt(
 
 Your perspective: ${agent.perspective}
 
+You have access to a web search tool. Use it proactively when your argument benefits from current data, recent statistics, or specific facts you are unsure about. You may search multiple times. Incorporate results naturally with attribution (e.g., "According to [source]...").
+
 Stay fully in character. Be intellectually rigorous, specific, and persuasive. Engage directly with the question and, in later rounds, with other agents' arguments. Write 3-5 substantive paragraphs.`,
     user: `Question under debate: "${question}"
 

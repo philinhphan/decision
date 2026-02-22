@@ -8,6 +8,22 @@ interface MessageBubbleProps {
   message: Message;
   agent: Agent;
   isActive: boolean;
+  isSearching?: boolean;
+}
+
+function SearchingIndicator() {
+  return (
+    <div className="flex items-center gap-2 text-xs text-gray-400">
+      <motion.span
+        animate={{ rotate: 360 }}
+        transition={{ repeat: Infinity, duration: 1.2, ease: "linear" }}
+        className="inline-block"
+      >
+        🔍
+      </motion.span>
+      <span>Searching the web…</span>
+    </div>
+  );
 }
 
 function TypingDots() {
@@ -29,7 +45,7 @@ function TypingDots() {
   );
 }
 
-export function MessageBubble({ message, agent, isActive }: MessageBubbleProps) {
+export function MessageBubble({ message, agent, isActive, isSearching }: MessageBubbleProps) {
   const colors = COLOR_CLASSES[agent.color] ?? COLOR_CLASSES.blue;
 
   return (
@@ -53,9 +69,18 @@ export function MessageBubble({ message, agent, isActive }: MessageBubbleProps) 
         }`}
       >
         {message.content ? (
-          <p className="text-sm text-gray-200 leading-relaxed whitespace-pre-wrap">
-            {message.content}
-          </p>
+          <>
+            <p className="text-sm text-gray-200 leading-relaxed whitespace-pre-wrap">
+              {message.content}
+            </p>
+            {isSearching && (
+              <div className="mt-2 pt-2 border-t border-gray-700">
+                <SearchingIndicator />
+              </div>
+            )}
+          </>
+        ) : isSearching ? (
+          <SearchingIndicator />
         ) : (
           <TypingDots />
         )}

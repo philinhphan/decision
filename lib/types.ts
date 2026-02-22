@@ -42,6 +42,7 @@ export interface DebateState {
   error?: string;
   activeAgentId?: string;
   activeMessageId?: string;
+  activeSearchMessageId?: string;
 }
 
 export interface KeyArgument {
@@ -56,6 +57,8 @@ export type SSEEvent =
   | { type: "agent_start"; agentId: string; messageId: string }
   | { type: "agent_token"; agentId: string; messageId: string; token: string }
   | { type: "agent_done"; agentId: string; messageId: string }
+  | { type: "agent_search_start"; agentId: string; messageId: string; query: string }
+  | { type: "agent_search_done"; agentId: string; messageId: string }
   | { type: "summary_token"; token: string }
   | { type: "summary_done" }
   | { type: "decision_ready"; decision: string; confidence: number; keyArguments: KeyArgument[] }

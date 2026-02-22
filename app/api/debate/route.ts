@@ -1,5 +1,5 @@
 import { openai } from "@ai-sdk/openai";
-import { generateObject, streamText } from "ai";
+import { generateObject, streamText, stepCountIs } from "ai";
 import { nanoid } from "nanoid";
 import { generateAgents } from "@/lib/agent-generator";
 import {
@@ -9,6 +9,7 @@ import {
   DecisionOutputSchema,
 } from "@/lib/prompts";
 import type { Agent, AgentSpec, Message, SSEEvent } from "@/lib/types";
+import { webSearchTool } from "@/lib/tools";
 
 export const maxDuration = 300;
 
@@ -76,11 +77,20 @@ export async function POST(req: Request) {
               prompt: user,
               maxOutputTokens: 600,
               temperature: 0.85,
+              tools: { webSearch: webSearchTool },
+              stopWhen: stepCountIs(5),
             });
 
-            for await (const chunk of result.textStream) {
-              content += chunk;
-              send({ type: "agent_token", agentId: agent.id, messageId, token: chunk });
+            for await (const chunk of result.fullStream) {
+              if (chunk.type === "text-delta") {
+                content += chunk.text;
+                send({ type: "agent_token", agentId: agent.id, messageId, token: chunk.text });
+              } else if (chunk.type === "tool-call") {
+                const query = (chunk.input as { query: string }).query ?? "";
+                send({ type: "agent_search_start", agentId: agent.id, messageId, query });
+              } else if (chunk.type === "tool-result") {
+                send({ type: "agent_search_done", agentId: agent.id, messageId });
+              }
             }
 
             allMessages.push({

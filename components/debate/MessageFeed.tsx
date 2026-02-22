@@ -9,9 +9,10 @@ interface MessageFeedProps {
   messages: Message[];
   agents: Agent[];
   activeMessageId?: string;
+  activeSearchMessageId?: string;
 }
 
-export function MessageFeed({ messages, agents, activeMessageId }: MessageFeedProps) {
+export function MessageFeed({ messages, agents, activeMessageId, activeSearchMessageId }: MessageFeedProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -32,6 +33,7 @@ export function MessageFeed({ messages, agents, activeMessageId }: MessageFeedPr
               message={message}
               agent={agent}
               isActive={message.id === activeMessageId}
+              isSearching={message.id === activeSearchMessageId}
             />
           );
         })}

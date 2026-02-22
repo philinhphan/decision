@@ -21,6 +21,7 @@ export function DebateContainer({ state, onReset }: DebateContainerProps) {
     totalRounds,
     activeAgentId,
     activeMessageId,
+    activeSearchMessageId,
     decision,
     confidence,
     keyArguments,
@@ -64,6 +65,7 @@ export function DebateContainer({ state, onReset }: DebateContainerProps) {
           messages={messages}
           agents={agents}
           activeMessageId={activeMessageId}
+          activeSearchMessageId={activeSearchMessageId}
         />
       )}
 
