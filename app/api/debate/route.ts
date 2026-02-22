@@ -79,20 +79,19 @@ export async function POST(req: Request) {
       };
 
       try {
-        // Step 1: Generate agents
+        // Step 1: Start web search and agent generation in parallel
+        send({ type: "search_start", query: question });
+        const webSearchPromise = performWebSearch(question).catch(() => undefined);
+
         const agents: Agent[] = await generateAgents(question, agentSpecs);
         send({ type: "agents_ready", agents });
 
-        // Step 2: Single upfront web search shared across all agents (optional)
-        let webContext = "";
-        try {
-          send({ type: "search_start", query: question });
-          webContext = await performWebSearch(question);
+        // Web context starts undefined; populated before round 2 starts
+        let webContext: string | undefined;
+        const webContextReady = webSearchPromise.then((ctx) => {
+          webContext = ctx;
           send({ type: "search_done" });
-        } catch {
-          // Web search failed, continue without it
-          send({ type: "search_done" });
-        }
+        });
 
         const totalRounds = 3;
         const allMessages: Message[] = [];
