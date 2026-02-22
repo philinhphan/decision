@@ -59,12 +59,13 @@ function applyEvent(state: DebateState, event: SSEEvent): DebateState {
     }
 
     case "agent_done": {
-      // Update the message with stance if provided
-      const updatedMessages = event.stance
-        ? state.messages.map((m) =>
-            m.id === event.messageId ? { ...m, stance: event.stance } : m
-          )
-        : state.messages;
+      // Update the message with stance and clean content
+      const updatedMessages = state.messages.map((m) => {
+        if (m.id !== event.messageId) return m;
+        // Remove stance prefix from content
+        const cleanContent = m.content.replace(/\[STANCE:\s*\d\]\s*/i, "").trim();
+        return { ...m, content: cleanContent, stance: event.stance };
+      });
       return {
         ...state,
         messages: updatedMessages,

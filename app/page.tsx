@@ -228,9 +228,10 @@ export default function Home() {
                 messages={state.messages}
                 question={state.question}
                 currentRound={state.currentRound}
+                activeAgentId={state.activeAgentId}
               />
 
-              {/* Summary Panel when done */}
+              {/* Summary Panel when done - moved above deliberation */}
               {state.status === "done" && state.decision && (
                 <div className="mt-8">
                   <SummaryPanel
@@ -238,6 +239,40 @@ export default function Home() {
                     confidence={state.confidence}
                     summary={state.summary}
                   />
+                </div>
+              )}
+
+              {/* Conversation Feed */}
+              {state.messages.length > 0 && (
+                <div className="mt-8 border-t border-gray-200 pt-8">
+                  <p className="text-xs tracking-[0.2em] text-gray-400 mb-6 text-center">DELIBERATION</p>
+                  <div className="space-y-4 max-w-2xl mx-auto">
+                    {state.messages.map((msg) => {
+                      const agent = state.agents.find((a) => a.id === msg.agentId);
+                      if (!agent || !msg.content) return null;
+                      return (
+                        <motion.div
+                          key={msg.id}
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="flex gap-3"
+                        >
+                          <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm bg-gray-100 border border-gray-200 shrink-0">
+                            {agent.emoji}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-baseline gap-2 mb-1">
+                              <span className="text-sm font-medium text-black">
+                                {agent.name.split(" ").pop()}
+                              </span>
+                              <span className="text-xs text-gray-400">Round {msg.round}</span>
+                            </div>
+                            <p className="text-sm text-gray-700 leading-relaxed">{msg.content}</p>
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
 

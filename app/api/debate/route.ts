@@ -8,13 +8,34 @@ import {
   buildDecisionPrompt,
   DecisionOutputSchema,
 } from "@/lib/prompts";
-import type { Agent, AgentSpec, Message, SSEEvent } from "@/lib/types";
+import type { Agent, AgentSpec, Message, SSEEvent, StanceLevel } from "@/lib/types";
 import { performWebSearch } from "@/lib/tools";
 
 export const maxDuration = 300;
 
 function sseEvent(event: SSEEvent): string {
   return `data: ${JSON.stringify(event)}\n\n`;
+}
+
+function parseStance(content: string): { cleanContent: string; stance?: StanceLevel } {
+  const patterns = [
+    /\[STANCE:\s*(\d)\]/i,
+    /\[STANCE\s*(\d)\]/i,
+    /STANCE:\s*(\d)/i,
+    /^\s*\[(\d)\]/m,
+  ];
+
+  for (const pattern of patterns) {
+    const match = content.match(pattern);
+    if (match) {
+      const stanceNum = parseInt(match[1], 10);
+      if (stanceNum >= 1 && stanceNum <= 6) {
+        const cleanContent = content.replace(pattern, "").trim();
+        return { cleanContent, stance: stanceNum as StanceLevel };
+      }
+    }
+  }
+  return { cleanContent: content };
 }
 
 export async function POST(req: Request) {
@@ -40,12 +61,18 @@ export async function POST(req: Request) {
         const agents: Agent[] = await generateAgents(question, agentSpecs);
         send({ type: "agents_ready", agents });
 
-        // Step 2: Single upfront web search shared across all agents
-        send({ type: "search_start", query: question });
-        const webContext = await performWebSearch(question);
-        send({ type: "search_done" });
+        // Step 2: Single upfront web search shared across all agents (optional)
+        let webContext = "";
+        try {
+          send({ type: "search_start", query: question });
+          webContext = await performWebSearch(question);
+          send({ type: "search_done" });
+        } catch {
+          // Web search failed, continue without it
+          send({ type: "search_done" });
+        }
 
-        const totalRounds = 8;
+        const totalRounds = 3;
         const allMessages: Message[] = [];
 
         // Step 3: Run debate rounds
@@ -100,15 +127,18 @@ export async function POST(req: Request) {
               send({ type: "agent_token", agentId: agent.id, messageId, token: chunk });
             }
 
+            // Parse stance from response
+            const { cleanContent, stance } = parseStance(content);
+
             allMessages.push({
               id: messageId,
               agentId: agent.id,
-              content,
+              content: cleanContent,
               round,
               timestamp: Date.now(),
             });
 
-            send({ type: "agent_done", agentId: agent.id, messageId });
+            send({ type: "agent_done", agentId: agent.id, messageId, stance });
           }
         }
 

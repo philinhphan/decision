@@ -24,7 +24,6 @@ export function DebateContainer({ state, onReset }: DebateContainerProps) {
     activeSearchMessageId,
     decision,
     confidence,
-    keyArguments,
     summary,
     question,
   } = state;
@@ -80,9 +79,7 @@ export function DebateContainer({ state, onReset }: DebateContainerProps) {
           <SummaryPanel
             decision={decision}
             confidence={confidence}
-            keyArguments={keyArguments}
             summary={summary}
-            agents={agents}
           />
         )}
       </AnimatePresence>

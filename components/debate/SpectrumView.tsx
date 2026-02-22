@@ -1,6 +1,6 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import type { Agent, Message, StanceLevel } from "@/lib/types";
 
 const LANES: { level: StanceLevel; label: string }[] = [
@@ -17,15 +17,20 @@ interface SpectrumViewProps {
   messages: Message[];
   question: string;
   currentRound: number;
+  activeAgentId?: string;
 }
 
-export function SpectrumView({ agents, messages, question, currentRound }: SpectrumViewProps) {
-  // Get the latest stance for each agent
+export function SpectrumView({ agents, messages, question, currentRound, activeAgentId }: SpectrumViewProps) {
+  // Get the latest stance and message for each agent
   const agentStances = new Map<string, StanceLevel>();
+  const agentMessages = new Map<string, string>();
 
   for (const msg of messages) {
     if (msg.stance) {
       agentStances.set(msg.agentId, msg.stance);
+    }
+    if (msg.content) {
+      agentMessages.set(msg.agentId, msg.content);
     }
   }
 
@@ -108,6 +113,13 @@ export function SpectrumView({ agents, messages, question, currentRound }: Spect
               yOffset = 60 + Math.floor(indexInLane / 2) * 70;
             }
 
+            const isActive = activeAgentId === agent.id;
+            // Only show message for the currently active agent
+            const currentMessage = isActive ? agentMessages.get(agent.id) : null;
+            const truncatedMessage = currentMessage
+              ? (currentMessage.length > 100 ? currentMessage.slice(0, 100) + "..." : currentMessage)
+              : null;
+
             return (
               <motion.div
                 key={agent.id}
@@ -124,7 +136,26 @@ export function SpectrumView({ agents, messages, question, currentRound }: Spect
                 }}
                 className="absolute flex flex-col items-center"
               >
-                <div className="w-12 h-12 rounded-full flex items-center justify-center text-xl shadow-md border-2 border-gray-200 bg-white">
+                {/* Speech bubble - only for active agent */}
+                <AnimatePresence>
+                  {isActive && truncatedMessage && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 5, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 5, scale: 0.95 }}
+                      transition={{ duration: 0.2 }}
+                      className="absolute bottom-full mb-2 w-52 p-3 rounded-xl text-xs leading-relaxed shadow-lg border bg-black text-white border-black z-20"
+                    >
+                      {truncatedMessage}
+                      {/* Speech bubble tail */}
+                      <div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-l-[8px] border-r-[8px] border-t-[8px] border-l-transparent border-r-transparent border-t-black" />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                <div className={`w-12 h-12 rounded-full flex items-center justify-center text-xl shadow-md border-2 bg-white transition-all ${
+                  isActive ? "border-black ring-2 ring-black/20 scale-110" : "border-gray-200"
+                }`}>
                   {agent.emoji}
                 </div>
                 <p className="text-xs mt-1 text-center font-medium text-black">
