@@ -20,7 +20,13 @@ const initialState: DebateState = {
 function applyEvent(state: DebateState, event: SSEEvent): DebateState {
   switch (event.type) {
     case "agents_ready":
-      return { ...state, agents: event.agents, status: "debating" };
+      return { ...state, agents: event.agents, status: "searching" };
+
+    case "search_start":
+      return { ...state, status: "searching" };
+
+    case "search_done":
+      return { ...state, status: "debating" };
 
     case "round_start":
       return {

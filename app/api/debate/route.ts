@@ -1,5 +1,5 @@
-import { model } from "@/lib/ai";
-import { generateObject, streamText, stepCountIs } from "ai";
+import { openai } from "@ai-sdk/openai";
+import { generateObject, streamText } from "ai";
 import { nanoid } from "nanoid";
 import { generateAgents } from "@/lib/agent-generator";
 import {
@@ -8,35 +8,13 @@ import {
   buildDecisionPrompt,
   DecisionOutputSchema,
 } from "@/lib/prompts";
-import type { Agent, AgentSpec, Message, SSEEvent, StanceLevel } from "@/lib/types";
-import { webSearchTool } from "@/lib/tools";
+import type { Agent, AgentSpec, Message, SSEEvent } from "@/lib/types";
+import { performWebSearch } from "@/lib/tools";
 
 export const maxDuration = 300;
 
 function sseEvent(event: SSEEvent): string {
   return `data: ${JSON.stringify(event)}\n\n`;
-}
-
-function parseStance(content: string): { cleanContent: string; stance?: StanceLevel } {
-  // Try multiple patterns to find stance
-  const patterns = [
-    /\[STANCE:\s*(\d)\]/i,           // [STANCE: 4]
-    /\[STANCE\s*(\d)\]/i,            // [STANCE 4]
-    /STANCE:\s*(\d)/i,               // STANCE: 4
-    /^\s*\[(\d)\]/m,                 // [4] at start of line
-  ];
-
-  for (const pattern of patterns) {
-    const match = content.match(pattern);
-    if (match) {
-      const stanceNum = parseInt(match[1], 10);
-      if (stanceNum >= 1 && stanceNum <= 6) {
-        const cleanContent = content.replace(pattern, "").trim();
-        return { cleanContent, stance: stanceNum as StanceLevel };
-      }
-    }
-  }
-  return { cleanContent: content };
 }
 
 export async function POST(req: Request) {
@@ -62,10 +40,15 @@ export async function POST(req: Request) {
         const agents: Agent[] = await generateAgents(question, agentSpecs);
         send({ type: "agents_ready", agents });
 
+        // Step 2: Single upfront web search shared across all agents
+        send({ type: "search_start", query: question });
+        const webContext = await performWebSearch(question);
+        send({ type: "search_done" });
+
         const totalRounds = 8;
         const allMessages: Message[] = [];
 
-        // Step 2: Run debate rounds
+        // Step 3: Run debate rounds
         for (let round = 1; round <= totalRounds; round++) {
           send({ type: "round_start", round, totalRounds });
 
@@ -98,48 +81,38 @@ export async function POST(req: Request) {
               round,
               totalRounds,
               priorMessages,
-              lastMsg
+              lastMsg,
+              webContext
             );
 
             let content = "";
 
             const result = await streamText({
-              model,
+              model: openai("gpt-4o-mini"),
               system,
               prompt: user,
-maxOutputTokens: 600,
-              tools: { webSearch: webSearchTool },
-              stopWhen: stepCountIs(5),
+              maxOutputTokens: 80,
+              temperature: 0.85,
             });
 
-            for await (const chunk of result.fullStream) {
-              if (chunk.type === "text-delta") {
-                content += chunk.text;
-                send({ type: "agent_token", agentId: agent.id, messageId, token: chunk.text });
-              } else if (chunk.type === "tool-call") {
-                const query = (chunk.input as { query: string }).query ?? "";
-                send({ type: "agent_search_start", agentId: agent.id, messageId, query });
-              } else if (chunk.type === "tool-result") {
-                send({ type: "agent_search_done", agentId: agent.id, messageId });
-              }
+            for await (const chunk of result.textStream) {
+              content += chunk;
+              send({ type: "agent_token", agentId: agent.id, messageId, token: chunk });
             }
-
-            // Parse stance from content
-            const { cleanContent, stance } = parseStance(content);
 
             allMessages.push({
               id: messageId,
               agentId: agent.id,
-              content: cleanContent,
+              content,
               round,
               timestamp: Date.now(),
             });
 
-            send({ type: "agent_done", agentId: agent.id, messageId, stance });
+            send({ type: "agent_done", agentId: agent.id, messageId });
           }
         }
 
-        // Step 3: Stream summary
+        // Step 4: Stream summary
         const summaryContext = allMessages.map((m) => {
           const agent = agents.find((a) => a.id === m.agentId);
           return {
@@ -156,10 +129,11 @@ maxOutputTokens: 600,
 
         let summaryText = "";
         const summaryResult = await streamText({
-          model,
+          model: openai("gpt-4o-mini"),
           system: sumSystem,
           prompt: sumUser,
           maxOutputTokens: 800,
+          temperature: 0.7,
         });
 
         for await (const chunk of summaryResult.textStream) {
@@ -169,7 +143,7 @@ maxOutputTokens: 600,
 
         send({ type: "summary_done" });
 
-        // Step 4: Generate structured decision
+        // Step 5: Generate structured decision
         const { system: decSystem, user: decUser } = buildDecisionPrompt(
           question,
           summaryText,
@@ -177,10 +151,11 @@ maxOutputTokens: 600,
         );
 
         const decisionResult = await generateObject({
-          model,
+          model: openai("gpt-4o-mini"),
           system: decSystem,
           prompt: decUser,
           schema: DecisionOutputSchema,
+          temperature: 0.3,
         });
 
         send({

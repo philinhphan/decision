@@ -78,7 +78,8 @@ export function buildAgentDebaterPrompt(
   round: number,
   totalRounds: number,
   priorMessages: { agentName: string; content: string; round: number }[],
-  lastMessage?: { agentName: string; content: string } | null
+  lastMessage?: { agentName: string; content: string } | null,
+  webContext?: string
 ): { system: string; user: string } {
   const roundContext =
     round === 1
@@ -100,11 +101,15 @@ export function buildAgentDebaterPrompt(
       ? `\n\n${lastMessage.agentName} just said: "${lastMessage.content.slice(0, 200)}"\n\nRespond to them directly — name them, then make your point.`
       : "";
 
+  const webContextBlock = webContext
+    ? `\n\nBackground research:\n${webContext.slice(0, 800)}`
+    : "";
+
   return {
     system: `You are ${agent.name}, ${agent.role}. ${agent.perspective}
 
 This is a live debate. Keep it short and sharp: 2-3 sentences maximum. Be direct, conversational, and combative when warranted. No lengthy explanations — one clear point per turn.`,
-    user: `Debate question: "${question}"
+    user: `Debate question: "${question}"${webContextBlock}
 
 Turn ${round} of ${totalRounds}. ${roundContext}${priorContext}${lastMessageBlock}
 

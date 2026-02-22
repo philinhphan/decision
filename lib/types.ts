@@ -35,6 +35,7 @@ export interface Message {
 export type DebateStatus =
   | "idle"
   | "generating_agents"
+  | "searching"
   | "debating"
   | "summarizing"
   | "done"
@@ -71,6 +72,8 @@ export type SSEEvent =
   | { type: "agent_done"; agentId: string; messageId: string; stance?: StanceLevel }
   | { type: "agent_search_start"; agentId: string; messageId: string; query: string }
   | { type: "agent_search_done"; agentId: string; messageId: string }
+  | { type: "search_start"; query: string }
+  | { type: "search_done" }
   | { type: "summary_token"; token: string }
   | { type: "summary_done" }
   | { type: "decision_ready"; decision: string; confidence: number; keyArguments: KeyArgument[] }
