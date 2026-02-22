@@ -52,13 +52,21 @@ function applyEvent(state: DebateState, event: SSEEvent): DebateState {
       return { ...state, messages };
     }
 
-    case "agent_done":
+    case "agent_done": {
+      // Update the message with stance if provided
+      const updatedMessages = event.stance
+        ? state.messages.map((m) =>
+            m.id === event.messageId ? { ...m, stance: event.stance } : m
+          )
+        : state.messages;
       return {
         ...state,
+        messages: updatedMessages,
         activeAgentId: undefined,
         activeMessageId: undefined,
         activeSearchMessageId: undefined,
       };
+    }
 
     case "agent_search_start":
       return { ...state, activeSearchMessageId: event.messageId };

@@ -12,12 +12,24 @@ export interface AgentSpec {
   description: string;
 }
 
+export type StanceLevel = 1 | 2 | 3 | 4 | 5 | 6;
+
+export const STANCE_LABELS: Record<StanceLevel, string> = {
+  1: "Strongly Disagree",
+  2: "Disagree",
+  3: "Somewhat Disagree",
+  4: "Somewhat Agree",
+  5: "Agree",
+  6: "Strongly Agree",
+};
+
 export interface Message {
   id: string;
   agentId: string;
   content: string;
   round: number;
   timestamp: number;
+  stance?: StanceLevel;
 }
 
 export type DebateStatus =
@@ -56,7 +68,7 @@ export type SSEEvent =
   | { type: "round_start"; round: number; totalRounds: number }
   | { type: "agent_start"; agentId: string; messageId: string }
   | { type: "agent_token"; agentId: string; messageId: string; token: string }
-  | { type: "agent_done"; agentId: string; messageId: string }
+  | { type: "agent_done"; agentId: string; messageId: string; stance?: StanceLevel }
   | { type: "agent_search_start"; agentId: string; messageId: string; query: string }
   | { type: "agent_search_done"; agentId: string; messageId: string }
   | { type: "summary_token"; token: string }

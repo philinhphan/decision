@@ -108,7 +108,7 @@ This is a live debate. Keep it short and sharp: 2-3 sentences maximum. Be direct
 
 Turn ${round} of ${totalRounds}. ${roundContext}${priorContext}${lastMessageBlock}
 
-Your response:`,
+CRITICAL: Start with [STANCE: X] where X is 1-6 (1=Strongly Disagree, 6=Strongly Agree). Then your response:`,
   };
 }
 

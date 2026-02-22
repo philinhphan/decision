@@ -1,4 +1,4 @@
-import { openai } from "@ai-sdk/openai";
+import { model } from "@/lib/ai";
 import { generateObject, streamText, stepCountIs } from "ai";
 import { nanoid } from "nanoid";
 import { generateAgents } from "@/lib/agent-generator";
@@ -8,13 +8,35 @@ import {
   buildDecisionPrompt,
   DecisionOutputSchema,
 } from "@/lib/prompts";
-import type { Agent, AgentSpec, Message, SSEEvent } from "@/lib/types";
+import type { Agent, AgentSpec, Message, SSEEvent, StanceLevel } from "@/lib/types";
 import { webSearchTool } from "@/lib/tools";
 
 export const maxDuration = 300;
 
 function sseEvent(event: SSEEvent): string {
   return `data: ${JSON.stringify(event)}\n\n`;
+}
+
+function parseStance(content: string): { cleanContent: string; stance?: StanceLevel } {
+  // Try multiple patterns to find stance
+  const patterns = [
+    /\[STANCE:\s*(\d)\]/i,           // [STANCE: 4]
+    /\[STANCE\s*(\d)\]/i,            // [STANCE 4]
+    /STANCE:\s*(\d)/i,               // STANCE: 4
+    /^\s*\[(\d)\]/m,                 // [4] at start of line
+  ];
+
+  for (const pattern of patterns) {
+    const match = content.match(pattern);
+    if (match) {
+      const stanceNum = parseInt(match[1], 10);
+      if (stanceNum >= 1 && stanceNum <= 6) {
+        const cleanContent = content.replace(pattern, "").trim();
+        return { cleanContent, stance: stanceNum as StanceLevel };
+      }
+    }
+  }
+  return { cleanContent: content };
 }
 
 export async function POST(req: Request) {
@@ -82,11 +104,10 @@ export async function POST(req: Request) {
             let content = "";
 
             const result = await streamText({
-              model: openai("gpt-4o-mini"),
+              model,
               system,
               prompt: user,
-              maxOutputTokens: 80,
-              temperature: 0.85,
+maxOutputTokens: 600,
               tools: { webSearch: webSearchTool },
               stopWhen: stepCountIs(5),
             });
@@ -103,15 +124,18 @@ export async function POST(req: Request) {
               }
             }
 
+            // Parse stance from content
+            const { cleanContent, stance } = parseStance(content);
+
             allMessages.push({
               id: messageId,
               agentId: agent.id,
-              content,
+              content: cleanContent,
               round,
               timestamp: Date.now(),
             });
 
-            send({ type: "agent_done", agentId: agent.id, messageId });
+            send({ type: "agent_done", agentId: agent.id, messageId, stance });
           }
         }
 
@@ -132,11 +156,10 @@ export async function POST(req: Request) {
 
         let summaryText = "";
         const summaryResult = await streamText({
-          model: openai("gpt-4o-mini"),
+          model,
           system: sumSystem,
           prompt: sumUser,
           maxOutputTokens: 800,
-          temperature: 0.7,
         });
 
         for await (const chunk of summaryResult.textStream) {
@@ -154,11 +177,10 @@ export async function POST(req: Request) {
         );
 
         const decisionResult = await generateObject({
-          model: openai("gpt-4o-mini"),
+          model,
           system: decSystem,
           prompt: decUser,
           schema: DecisionOutputSchema,
-          temperature: 0.3,
         });
 
         send({
