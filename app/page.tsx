@@ -1,14 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import Image from "next/image";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowRight, Loader2, RotateCcw, Plus, X, Edit2, Check } from "lucide-react";
 import { useDebate } from "@/hooks/useDebate";
+import { useTTS } from "@/hooks/useTTS";
 import { SpectrumView } from "@/components/debate/SpectrumView";
 import { SummaryPanel } from "@/components/debate/SummaryPanel";
 import { FileUploadZone } from "@/components/home/FileUploadZone";
 import { SUPREME_COURT_JUSTICES } from "@/lib/presets";
 import type { AgentSpec, UploadedFile } from "@/lib/types";
+import justicesData from "@/justices.json";
 
 export default function Home() {
   const [question, setQuestion] = useState("");
@@ -16,6 +19,24 @@ export default function Home() {
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const { state, startDebate, reset } = useDebate();
+  const tts = useTTS();
+  const completedMessageIdsRef = useRef(new Set<string>());
+  // Keep stable refs to tts functions so effects don't re-fire when tts object identity changes
+  const ttsEnqueueRef = useRef(tts.enqueue);
+  const ttsPrefetchRef = useRef(tts.prefetch);
+  const ttsStopRef = useRef(tts.stop);
+  useEffect(() => { ttsEnqueueRef.current = tts.enqueue; }, [tts.enqueue]);
+  useEffect(() => { ttsPrefetchRef.current = tts.prefetch; }, [tts.prefetch]);
+  useEffect(() => { ttsStopRef.current = tts.stop; }, [tts.stop]);
+
+  // Build a name → justice info lookup from justices.json
+  const justiceInfoMap = useMemo(() => {
+    const map: Record<string, typeof justicesData.justices[number]> = {};
+    for (const j of justicesData.justices) {
+      map[j.name] = j;
+    }
+    return map;
+  }, []);
 
   const isActive = state.status !== "idle" && state.status !== "error";
   const isLoading = state.status === "generating_agents";
@@ -29,7 +50,35 @@ export default function Home() {
     reset();
     setQuestion("");
     setUploadedFiles([]);
+    tts.stop();
+    completedMessageIdsRef.current.clear();
   };
+
+  useEffect(() => {
+    if (!isActive) {
+      ttsStopRef.current();
+      completedMessageIdsRef.current.clear();
+    }
+  }, [isActive]);
+
+  useEffect(() => {
+    for (const msg of state.messages) {
+      if (!msg.content?.trim()) continue;
+      // Skip messages still being generated
+      if (state.activeMessageIds.has(msg.id)) continue;
+      if (completedMessageIdsRef.current.has(msg.id)) continue;
+
+      completedMessageIdsRef.current.add(msg.id);
+      const agent = state.agents.find((a) => a.id === msg.agentId);
+      const voiceId = msg.voiceId || agent?.voiceId || undefined;
+      // Use spokenContent (with emotion cue) for TTS, display content stays clean
+      const ttsText = msg.spokenContent || msg.content;
+      // Always prefetch regardless of autoplay setting
+      void ttsPrefetchRef.current({ messageId: msg.id, text: ttsText, voiceId });
+      // enqueue reads autoplayRef internally — no need to check tts.controls.autoplay here
+      ttsEnqueueRef.current({ messageId: msg.id, text: ttsText, voiceId });
+    }
+  }, [state.agents, state.messages, state.activeMessageIds]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -39,7 +88,7 @@ export default function Home() {
   };
 
   const addAgent = () => {
-    setAgentSpecs([...agentSpecs, { name: "", description: "" }]);
+    setAgentSpecs([...agentSpecs, { name: "", description: "", voiceId: "" }]);
     setEditingIndex(agentSpecs.length);
   };
 
@@ -109,6 +158,11 @@ export default function Home() {
                     )}
                   </button>
                 </div>
+                {state.status === "error" && (
+                  <p className="text-xs text-rose-600">
+                    {state.error ?? "Deliberation failed. Check server logs and environment variables."}
+                  </p>
+                )}
               </div>
 
               {/* File Upload */}
@@ -154,6 +208,13 @@ export default function Home() {
                             placeholder="Role/perspective"
                             className="w-full text-xs text-gray-500 bg-transparent border-b border-gray-300 focus:outline-none focus:border-gray-500 pb-1"
                           />
+                          <input
+                            type="text"
+                            value={agent.voiceId ?? ""}
+                            onChange={(e) => updateAgent(i, "voiceId", e.target.value)}
+                            placeholder="ElevenLabs voice ID (optional)"
+                            className="w-full text-xs text-gray-500 bg-transparent border-b border-gray-300 focus:outline-none focus:border-gray-500 pb-1"
+                          />
                           <button
                             onClick={() => setEditingIndex(null)}
                             className="absolute top-1 right-1 p-1 text-gray-400 hover:text-gray-600"
@@ -163,6 +224,20 @@ export default function Home() {
                         </div>
                       ) : (
                         <>
+                          {agent.imageUrl && (
+                            <div className="flex justify-center mb-2">
+                              <div className="w-12 h-12 rounded-full overflow-hidden border border-gray-200">
+                                <Image
+                                  src={agent.imageUrl}
+                                  alt={agent.name}
+                                  width={48}
+                                  height={48}
+                                  className="w-full h-full object-cover object-top"
+                                  unoptimized
+                                />
+                              </div>
+                            </div>
+                          )}
                           <p className="text-sm font-medium text-black text-center">
                             {agent.name.split(" ").pop() || "Unnamed"}
                           </p>
@@ -244,6 +319,8 @@ export default function Home() {
                 question={state.question}
                 currentRound={state.currentRound}
                 activeAgentId={state.activeAgentId}
+                activeAgentIds={state.activeAgentIds}
+                justiceInfo={justiceInfoMap}
               />
 
               {/* Summary Panel when done - moved above deliberation */}
@@ -261,10 +338,58 @@ export default function Home() {
               {state.messages.length > 0 && (
                 <div className="mt-8 border-t border-gray-200 pt-8">
                   <p className="text-xs tracking-[0.2em] text-gray-400 mb-6 text-center">DELIBERATION</p>
+                  <div className="mb-6 flex flex-wrap items-center justify-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => tts.controls.setEnabled(!tts.controls.enabled)}
+                      className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
+                        tts.controls.enabled
+                          ? "border-gray-300 text-gray-700 hover:border-gray-500"
+                          : "border-rose-300 text-rose-700 hover:border-rose-500"
+                      }`}
+                    >
+                      {tts.controls.enabled ? "Sound: On" : "Sound: Muted"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => tts.controls.setAutoplay(!tts.controls.autoplay)}
+                      className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
+                        tts.controls.autoplay
+                          ? "border-emerald-300 text-emerald-700 hover:border-emerald-500"
+                          : "border-gray-300 text-gray-700 hover:border-gray-500"
+                      }`}
+                      title="Autoplay speaks new messages as they finish"
+                    >
+                      {tts.controls.autoplay ? "Autoplay: On" : "Autoplay: Off"}
+                    </button>
+                    {tts.nowPlayingMessageId && (
+                      <button
+                        type="button"
+                        onClick={() => tts.stop()}
+                        className="text-xs px-3 py-1.5 rounded-full border border-gray-300 text-gray-700 hover:border-gray-500 transition-colors"
+                      >
+                        Stop
+                      </button>
+                    )}
+                    {tts.controls.lastError && (
+                      <p className="text-xs text-rose-600">
+                        {tts.controls.lastError}{" "}
+                        <button
+                          type="button"
+                          onClick={() => tts.controls.clearError()}
+                          className="underline text-rose-600 hover:text-rose-700"
+                        >
+                          Dismiss
+                        </button>
+                      </p>
+                    )}
+                  </div>
                   <div className="space-y-4 max-w-2xl mx-auto">
                     {state.messages.map((msg) => {
                       const agent = state.agents.find((a) => a.id === msg.agentId);
                       if (!agent || !msg.content) return null;
+                      const isSpeaking = tts.nowPlayingMessageId === msg.id;
+                      const voiceId = msg.voiceId || agent.voiceId || undefined;
                       return (
                         <motion.div
                           key={msg.id}
@@ -272,8 +397,19 @@ export default function Home() {
                           animate={{ opacity: 1, y: 0 }}
                           className="flex gap-3"
                         >
-                          <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm bg-gray-100 border border-gray-200 shrink-0">
-                            {agent.emoji}
+                          <div className="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center text-sm bg-gray-100 border border-gray-200 shrink-0">
+                            {agent.imageUrl ? (
+                              <Image
+                                src={agent.imageUrl}
+                                alt={agent.name}
+                                width={32}
+                                height={32}
+                                className="w-full h-full object-cover object-top"
+                                unoptimized
+                              />
+                            ) : (
+                              agent.emoji
+                            )}
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-baseline gap-2 mb-1">
@@ -281,6 +417,25 @@ export default function Home() {
                                 {agent.name.split(" ").pop()}
                               </span>
                               <span className="text-xs text-gray-400">Round {msg.round}</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (isSpeaking) {
+                                    tts.stop();
+                                    return;
+                                  }
+                                  void tts.speakNow({
+                                    messageId: msg.id,
+                                    text: msg.content,
+                                    voiceId,
+                                  });
+                                }}
+                                disabled={!tts.controls.enabled || !msg.content.trim()}
+                                className="ml-auto text-xs text-gray-500 hover:text-black disabled:text-gray-300 transition-colors"
+                                title={!tts.controls.enabled ? "Muted" : voiceId ? "Speak" : "Speak (default voice)"}
+                              >
+                                {isSpeaking ? "■ Stop" : "🔊 Speak"}
+                              </button>
                             </div>
                             <p className="text-sm text-gray-700 leading-relaxed">{msg.content}</p>
                           </div>

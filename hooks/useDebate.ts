@@ -15,6 +15,8 @@ const initialState: DebateState = {
   confidence: 0,
   keyArguments: [],
   activeSearchMessageId: undefined,
+  activeAgentIds: new Set(),
+  activeMessageIds: new Set(),
 };
 
 function applyEvent(state: DebateState, event: SSEEvent): DebateState {
@@ -42,11 +44,18 @@ function applyEvent(state: DebateState, event: SSEEvent): DebateState {
         content: "",
         round: state.currentRound,
         timestamp: Date.now(),
+        voiceId: event.voiceId,
       };
+      const newAgentIds = new Set(state.activeAgentIds);
+      newAgentIds.add(event.agentId);
+      const newMessageIds = new Set(state.activeMessageIds);
+      newMessageIds.add(event.messageId);
       return {
         ...state,
         activeAgentId: event.agentId,
         activeMessageId: event.messageId,
+        activeAgentIds: newAgentIds,
+        activeMessageIds: newMessageIds,
         messages: [...state.messages, newMessage],
       };
     }
@@ -59,18 +68,25 @@ function applyEvent(state: DebateState, event: SSEEvent): DebateState {
     }
 
     case "agent_done": {
-      // Update the message with stance and clean content
+      // Update the message with stance, clean display content, and spoken content
       const updatedMessages = state.messages.map((m) => {
         if (m.id !== event.messageId) return m;
-        // Remove stance prefix from content
-        const cleanContent = m.content.replace(/\[STANCE:\s*\d\]\s*/i, "").trim();
-        return { ...m, content: cleanContent, stance: event.stance };
+        // Strip any remaining stance tag from streamed content (display)
+        const cleanContent = m.content.replace(/\[STANCE:\s*\d\]\s*/i, "").replace(/^\s*\([^)]{1,40}\)\s*/, "").trim();
+        return { ...m, content: cleanContent, stance: event.stance, spokenContent: event.spokenContent };
       });
+      const newAgentIds = new Set(state.activeAgentIds);
+      newAgentIds.delete(event.agentId);
+      const newMessageIds = new Set(state.activeMessageIds);
+      newMessageIds.delete(event.messageId);
       return {
         ...state,
         messages: updatedMessages,
-        activeAgentId: undefined,
-        activeMessageId: undefined,
+        activeAgentIds: newAgentIds,
+        activeMessageIds: newMessageIds,
+        // Legacy single-agent fields: clear only if this was the only active one
+        activeAgentId: newAgentIds.size === 0 ? undefined : state.activeAgentId,
+        activeMessageId: newMessageIds.size === 0 ? undefined : state.activeMessageId,
         activeSearchMessageId: undefined,
       };
     }
@@ -93,10 +109,19 @@ function applyEvent(state: DebateState, event: SSEEvent): DebateState {
         decision: event.decision,
         confidence: event.confidence,
         keyArguments: event.keyArguments,
+        forCount: event.forCount,
+        againstCount: event.againstCount,
+        totalVoters: event.totalVoters,
       };
 
     case "done":
-      return { ...state, status: "done", activeAgentId: undefined };
+      return {
+        ...state,
+        status: "done",
+        activeAgentId: undefined,
+        activeAgentIds: new Set(),
+        activeMessageIds: new Set(),
+      };
 
     case "error":
       return { ...state, status: "error", error: event.message };

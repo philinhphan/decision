@@ -1,12 +1,15 @@
 "use client";
 
+import Image from "next/image";
 import { motion } from "framer-motion";
 import { COLOR_CLASSES } from "@/lib/colors";
 import type { Agent, Message } from "@/lib/types";
+import type { UseTTS } from "@/hooks/useTTS";
 
 interface MessageBubbleProps {
   message: Message;
   agent: Agent;
+  tts: UseTTS;
   isActive: boolean;
   isSearching?: boolean;
 }
@@ -45,8 +48,10 @@ function TypingDots() {
   );
 }
 
-export function MessageBubble({ message, agent, isActive, isSearching }: MessageBubbleProps) {
+export function MessageBubble({ message, agent, tts, isActive, isSearching }: MessageBubbleProps) {
   const colors = COLOR_CLASSES[agent.color] ?? COLOR_CLASSES.blue;
+  const isSpeaking = message.id === tts.nowPlayingMessageId;
+  const resolvedVoiceId = message.voiceId || agent.voiceId || undefined;
 
   return (
     <motion.div
@@ -56,12 +61,45 @@ export function MessageBubble({ message, agent, isActive, isSearching }: Message
       className="space-y-2"
     >
       <div className="flex items-center gap-2">
-        <span className="text-lg">{agent.emoji}</span>
+        <div className="w-7 h-7 rounded-full overflow-hidden flex items-center justify-center text-base shrink-0 bg-gray-800">
+          {agent.imageUrl ? (
+            <Image
+              src={agent.imageUrl}
+              alt={agent.name}
+              width={28}
+              height={28}
+              className="w-full h-full object-cover object-top"
+              unoptimized
+            />
+          ) : (
+            agent.emoji
+          )}
+        </div>
         <span className={`text-sm font-medium ${colors.text}`}>{agent.name}</span>
         <span className="text-xs text-gray-600">{agent.role}</span>
         <span className={`text-xs px-2 py-0.5 rounded-full ${colors.badge}`}>
           Round {message.round}
         </span>
+        <button
+          type="button"
+          onClick={() => {
+            if (isSpeaking) {
+              tts.stop();
+              return;
+            }
+            void tts.speakNow({
+              messageId: message.id,
+              text: message.content,
+              voiceId: resolvedVoiceId,
+            });
+          }}
+          disabled={!tts.controls.enabled || !message.content?.trim()}
+          className="ml-auto text-xs text-gray-400 hover:text-gray-200 disabled:text-gray-600 transition-colors"
+          aria-label="Speak message"
+          title={!tts.controls.enabled ? "Muted" : resolvedVoiceId ? "Speak" : "Speak (default voice)"}
+        >
+          {isSpeaking ? "■ Stop" : "🔊 Speak"}
+        </button>
       </div>
       <div
         className={`rounded-xl px-4 py-3 border ${

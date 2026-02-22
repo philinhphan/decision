@@ -13,7 +13,7 @@ interface AgentSpecRowProps {
 export function AgentSpecRow({ spec, index, onChange, onRemove }: AgentSpecRowProps) {
   return (
     <div className="flex gap-2 items-start">
-      <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
+      <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-2">
         <input
           type="text"
           placeholder="Agent name"
@@ -26,6 +26,13 @@ export function AgentSpecRow({ spec, index, onChange, onRemove }: AgentSpecRowPr
           placeholder="Role / perspective"
           value={spec.description}
           onChange={(e) => onChange(index, "description", e.target.value)}
+          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-gray-500"
+        />
+        <input
+          type="text"
+          placeholder="ElevenLabs voice ID (optional)"
+          value={spec.voiceId ?? ""}
+          onChange={(e) => onChange(index, "voiceId", e.target.value)}
           className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-gray-500"
         />
       </div>

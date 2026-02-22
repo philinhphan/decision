@@ -6,6 +6,7 @@ import {
   buildAgentDebaterPrompt,
   buildSummarizerPrompt,
   buildDecisionPrompt,
+  computeVoteTally,
   DecisionOutputSchema,
 } from "@/lib/prompts";
 import type { Agent, AgentSpec, Message, SSEEvent, StanceLevel } from "@/lib/types";
@@ -17,7 +18,19 @@ function sseEvent(event: SSEEvent): string {
   return `data: ${JSON.stringify(event)}\n\n`;
 }
 
-function parseStance(content: string): { cleanContent: string; stance?: StanceLevel } {
+// Emotion cue pattern: a short parenthetical like (firmly) or (with conviction)
+// at the very start of the text (after stance tag is stripped)
+const EMOTION_CUE_RE = /^\s*\([^)]{1,40}\)\s*/;
+
+function stripEmotionCue(text: string): string {
+  return text.replace(EMOTION_CUE_RE, "");
+}
+
+function parseStance(content: string): {
+  displayContent: string;   // shown to user — no stance tag, no emotion cue
+  spokenContent: string;    // sent to TTS — no stance tag, no emotion cue (ElevenLabs reads parens literally)
+  stance?: StanceLevel;
+} {
   const patterns = [
     /\[STANCE:\s*(\d)\]/i,
     /\[STANCE\s*(\d)\]/i,
@@ -30,12 +43,21 @@ function parseStance(content: string): { cleanContent: string; stance?: StanceLe
     if (match) {
       const stanceNum = parseInt(match[1], 10);
       if (stanceNum >= 1 && stanceNum <= 6) {
-        const cleanContent = content.replace(pattern, "").trim();
-        return { cleanContent, stance: stanceNum as StanceLevel };
+        const afterStance = content.replace(pattern, "").trim();
+        const clean = stripEmotionCue(afterStance);
+        return {
+          spokenContent: clean,    // strip emotion cue — ElevenLabs reads parens literally
+          displayContent: clean,
+          stance: stanceNum as StanceLevel,
+        };
       }
     }
   }
-  return { cleanContent: content };
+  const clean = stripEmotionCue(content);
+  return {
+    spokenContent: clean,
+    displayContent: clean,
+  };
 }
 
 export async function POST(req: Request) {
@@ -75,72 +97,84 @@ export async function POST(req: Request) {
         const totalRounds = 3;
         const allMessages: Message[] = [];
 
-        // Step 3: Run debate rounds
+        // Step 3: Run debate rounds — all agents think in parallel per round
         for (let round = 1; round <= totalRounds; round++) {
           send({ type: "round_start", round, totalRounds });
 
-          for (const agent of agents) {
-            const messageId = nanoid(8);
-            send({ type: "agent_start", agentId: agent.id, messageId });
+          // Snapshot context at the start of this round (each agent sees the same prior state)
+          const priorMessages = allMessages.map((m) => {
+            const msgAgent = agents.find((a) => a.id === m.agentId);
+            return {
+              agentName: msgAgent?.name ?? "Unknown",
+              content: m.content,
+              round: m.round,
+            };
+          });
 
-            // Build prior context for this agent
-            const priorMessages = allMessages.map((m) => {
-              const msgAgent = agents.find((a) => a.id === m.agentId);
-              return {
-                agentName: msgAgent?.name ?? "Unknown",
-                content: m.content,
-                round: m.round,
+          const lastMsg =
+            allMessages.length > 0
+              ? (() => {
+                const last = allMessages[allMessages.length - 1];
+                const lastAgent = agents.find((a) => a.id === last.agentId);
+                return { agentName: lastAgent?.name ?? "Unknown", content: last.content };
+              })()
+              : null;
+
+          // Launch all agents simultaneously
+          const roundMessages = await Promise.all(
+            agents.map(async (agent) => {
+              const messageId = nanoid(8);
+              send({ type: "agent_start", agentId: agent.id, messageId, voiceId: agent.voiceId });
+
+              const { system, user } = buildAgentDebaterPrompt(
+                agent,
+                question,
+                round,
+                totalRounds,
+                priorMessages,
+                lastMsg,
+                webContext,
+                fileContext
+              );
+
+              let content = "";
+
+              const result = await streamText({
+                model: openai("gpt-4o-mini"),
+                system,
+                prompt: user,
+                maxOutputTokens: 80,
+                temperature: 0.85,
+              });
+
+              for await (const chunk of result.textStream) {
+                content += chunk;
+                send({ type: "agent_token", agentId: agent.id, messageId, token: chunk });
+              }
+
+              // Parse stance and split display vs. spoken content
+              const { displayContent, spokenContent, stance } = parseStance(content);
+
+              const message: Message = {
+                id: messageId,
+                agentId: agent.id,
+                content: displayContent,
+                spokenContent,
+                round,
+                timestamp: Date.now(),
+                voiceId: agent.voiceId,
+                stance, // store for vote tally computation after all rounds
               };
-            });
 
-            const lastMsg =
-              allMessages.length > 0
-                ? (() => {
-                  const last = allMessages[allMessages.length - 1];
-                  const lastAgent = agents.find((a) => a.id === last.agentId);
-                  return { agentName: lastAgent?.name ?? "Unknown", content: last.content };
-                })()
-                : null;
+              // Each agent signals done as soon as they finish
+              send({ type: "agent_done", agentId: agent.id, messageId, stance, spokenContent });
 
-            const { system, user } = buildAgentDebaterPrompt(
-              agent,
-              question,
-              round,
-              totalRounds,
-              priorMessages,
-              lastMsg,
-              webContext,
-              fileContext
-            );
+              return message;
+            })
+          );
 
-            let content = "";
-
-            const result = await streamText({
-              model: openai("gpt-4o-mini"),
-              system,
-              prompt: user,
-              maxOutputTokens: 80,
-              temperature: 0.85,
-            });
-
-            for await (const chunk of result.textStream) {
-              content += chunk;
-              send({ type: "agent_token", agentId: agent.id, messageId, token: chunk });
-            }
-
-            // Parse stance from response
-            const { cleanContent, stance } = parseStance(content);
-
-            allMessages.push({
-              id: messageId,
-              agentId: agent.id,
-              content: cleanContent,
-              round,
-              timestamp: Date.now(),
-            });
-
-            send({ type: "agent_done", agentId: agent.id, messageId, stance });
-          }
+          // Add all round messages to history for the next round
+          allMessages.push(...roundMessages);
         }
 
         // Step 4: Stream summary
@@ -175,11 +209,22 @@ export async function POST(req: Request) {
 
         send({ type: "summary_done" });
 
-        // Step 5: Generate structured decision
+        // Step 5: Compute ground-truth vote tally from final stances, then generate decision
+        const tallyMessages = allMessages.map((m) => {
+          const a = agents.find((ag) => ag.id === m.agentId);
+          return {
+            agentId: m.agentId,
+            agentName: a?.name ?? "Unknown",
+            round: m.round,
+            stance: m.stance,
+          };
+        });
+        const tally = computeVoteTally(tallyMessages);
+
         const { system: decSystem, user: decUser } = buildDecisionPrompt(
           question,
           summaryText,
-          agents.map((a) => a.id)
+          tally
         );
 
         const decisionResult = await generateObject({
@@ -187,7 +232,7 @@ export async function POST(req: Request) {
           system: decSystem,
           prompt: decUser,
           schema: DecisionOutputSchema,
-          temperature: 0.3,
+          temperature: 0.1, // very low — must follow the tally faithfully
         });
 
         send({
@@ -195,6 +240,9 @@ export async function POST(req: Request) {
           decision: decisionResult.object.decision,
           confidence: decisionResult.object.confidence,
           keyArguments: decisionResult.object.keyArguments,
+          forCount: tally.forCount,
+          againstCount: tally.againstCount,
+          totalVoters: tally.totalVoters,
         });
 
         send({ type: "done" });

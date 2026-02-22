@@ -5,6 +5,7 @@ import { AgentSchema, AgentsOutputSchema, buildAgentGeneratorPrompt, getAgentCou
 import { getColorForIndex } from "./colors";
 import type { Agent, AgentSpec } from "./types";
 import { z } from "zod";
+import { pickVoiceIdForIndex } from "./voices";
 
 const EMOJIS = ["⚖️", "🏛️", "📊", "🔬", "💡", "🌍", "💼", "📚", "🎯", "🧠"];
 
@@ -33,12 +34,36 @@ export async function generateAgents(
     }),
   });
 
-  return result.object.agents.map((agent, i) => ({
+  const generated = result.object.agents;
+
+  const normalizeName = (name: string) => name.trim().toLowerCase().replace(/\s+/g, " ");
+
+  if (agentSpecs && agentSpecs.length > 0) {
+    const generatedByName = new Map<string, (typeof generated)[number]>();
+    for (const g of generated) generatedByName.set(normalizeName(g.name), g);
+
+    return agentSpecs.map((spec, i) => {
+      const match = generatedByName.get(normalizeName(spec.name)) ?? generated[i];
+      return {
+        id: match?.id || nanoid(8),
+        name: spec.name,
+        role: match?.role ?? "",
+        perspective: match?.perspective ?? "",
+        color: match?.color || getColorForIndex(i),
+        emoji: match?.emoji || EMOJIS[i % EMOJIS.length],
+        voiceId: spec.voiceId?.trim() || pickVoiceIdForIndex(i),
+        imageUrl: spec.imageUrl,
+      };
+    });
+  }
+
+  return generated.map((agent, i) => ({
     id: agent.id || nanoid(8),
     name: agent.name,
     role: agent.role,
     perspective: agent.perspective,
     color: agent.color || getColorForIndex(i),
     emoji: agent.emoji || EMOJIS[i % EMOJIS.length],
+    voiceId: pickVoiceIdForIndex(i),
   }));
 }

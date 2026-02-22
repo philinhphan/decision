@@ -8,13 +8,21 @@ interface SummaryPanelProps {
   decision: string;
   confidence: number;
   summary: string;
+  forCount?: number;
+  againstCount?: number;
+  totalVoters?: number;
 }
 
 export function SummaryPanel({
   decision,
   confidence,
   summary,
+  forCount,
+  againstCount,
+  totalVoters,
 }: SummaryPanelProps) {
+  const hasVotes = typeof forCount === "number" && typeof againstCount === "number" && typeof totalVoters === "number";
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -28,6 +36,17 @@ export function SummaryPanel({
           <CheckCircle size={18} />
           <span className="text-xs font-medium uppercase tracking-[0.15em]">Verdict</span>
         </div>
+
+        {/* Vote tally */}
+        {hasVotes && (
+          <div className="flex items-center gap-3 pb-1">
+            <span className="text-2xl font-bold text-emerald-600">{forCount} FOR</span>
+            <span className="text-gray-300 text-xl">—</span>
+            <span className="text-2xl font-bold text-rose-600">{againstCount} AGAINST</span>
+            <span className="text-xs text-gray-400 ml-1">({totalVoters} justice{totalVoters !== 1 ? "s" : ""})</span>
+          </div>
+        )}
+
         <p className="text-xl text-black font-medium leading-relaxed">{decision}</p>
         <ConfidenceBar value={confidence} />
       </div>

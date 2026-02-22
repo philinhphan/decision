@@ -14,12 +14,16 @@ export const AgentsOutputSchema = z.object({
 });
 
 export const DecisionOutputSchema = z.object({
-  decision: z.string().describe("A clear, definitive answer or verdict to the question"),
+  decision: z.string().describe(
+    "A clear, definitive verdict (2-3 sentences). MUST be consistent with the vote tally provided: if FOR > AGAINST the verdict is affirmative; if AGAINST > FOR the verdict is negative; if tied, say so explicitly."
+  ),
   confidence: z
     .number()
     .min(0)
     .max(100)
-    .describe("Confidence level 0-100 based on debate consensus"),
+    .describe(
+      "Confidence 0-100, derived from the vote margin. Unanimous = ~95, strong majority = 70-85, slim majority = 50-65, tie = 50."
+    ),
   keyArguments: z.array(
     z.object({
       agentId: z.string(),
@@ -53,7 +57,10 @@ export function buildAgentGeneratorPrompt(
 User has specified these agents:
 ${agentSpecs.map((a, i) => `${i + 1}. ${a.name}: ${a.description}`).join("\n")}
 
-For each agent, create a complete profile. Assign each a unique color from: blue, emerald, violet, amber, rose, cyan, orange, teal, indigo, pink. Assign a relevant emoji. Return exactly ${agentSpecs.length} agents as JSON.`,
+For each agent, create a complete profile. IMPORTANT:
+- Return the agents in the exact same order as provided above.
+- Do not rename the agents (keep their names exactly).
+Assign each a unique color from: blue, emerald, violet, amber, rose, cyan, orange, teal, indigo, pink. Assign a relevant emoji. Return exactly ${agentSpecs.length} agents as JSON.`,
     };
   }
 
@@ -113,12 +120,15 @@ export function buildAgentDebaterPrompt(
   return {
     system: `You are ${agent.name}, ${agent.role}. ${agent.perspective}
 
-This is a live debate. Keep it short and sharp: 2-3 sentences maximum. Be direct, conversational, and combative when warranted. No lengthy explanations — one clear point per turn.`,
+This is a live debate. Keep it short and sharp: 2-3 sentences maximum. Be direct, conversational, and combative when warranted. No lengthy explanations — one clear point per turn.
+
+VOICE EMOTION INSTRUCTIONS (hidden from viewer, for audio synthesis only):
+Naturally weave in one brief parenthetical emotion cue that reflects your feeling in that moment — e.g. (firmly), (with frustration), (leaning forward), (measured but resolute), (incredulous), (passionately), (with quiet conviction), (sighing), (sharply). Place it at the start of your spoken response, right after the stance tag. Keep it to 1-3 words in parentheses. Do not explain the cue; just use it naturally.`,
     user: `Debate question: "${question}"${webContextBlock}${fileContextBlock}
 
 Turn ${round} of ${totalRounds}. ${roundContext}${priorContext}${lastMessageBlock}
 
-CRITICAL: Start with [STANCE: X] where X is 1-6 (1=Strongly Disagree, 6=Strongly Agree). Then your response:`,
+CRITICAL: Start with [STANCE: X] where X is 1-6 (1=Strongly Disagree, 6=Strongly Agree). Then a parenthetical emotion cue. Then your response (2-3 sentences):`,
   };
 }
 
@@ -152,19 +162,93 @@ Be analytical and direct. Do not hedge excessively.`,
   };
 }
 
+export interface VoteTally {
+  forCount: number;
+  againstCount: number;
+  totalVoters: number;
+  averageStance: number;
+  agentStances: { agentId: string; agentName: string; stance: number; finalRound: number }[];
+}
+
+/** Compute the ground-truth vote tally from each agent's FINAL stance. */
+export function computeVoteTally(
+  messages: { agentId: string; agentName: string; round: number; stance?: number }[],
+): VoteTally {
+  // Take each agent's latest recorded stance across all rounds
+  const latestByAgent = new Map<string, { agentName: string; stance: number; round: number }>();
+
+  for (const msg of messages) {
+    if (msg.stance == null) continue;
+    const existing = latestByAgent.get(msg.agentId);
+    if (!existing || msg.round > existing.round) {
+      latestByAgent.set(msg.agentId, {
+        agentName: msg.agentName,
+        stance: msg.stance,
+        round: msg.round,
+      });
+    }
+  }
+
+  const agentStances = Array.from(latestByAgent.entries()).map(([agentId, v]) => ({
+    agentId,
+    agentName: v.agentName,
+    stance: v.stance,
+    finalRound: v.round,
+  }));
+
+  const forCount = agentStances.filter((a) => a.stance >= 4).length;
+  const againstCount = agentStances.filter((a) => a.stance <= 3).length;
+  const totalVoters = agentStances.length;
+  const averageStance =
+    totalVoters > 0
+      ? agentStances.reduce((sum, a) => sum + a.stance, 0) / totalVoters
+      : 3.5;
+
+  return { forCount, againstCount, totalVoters, averageStance, agentStances };
+}
+
 export function buildDecisionPrompt(
   question: string,
   summary: string,
-  agentIds: string[]
+  tally: VoteTally
 ): { system: string; user: string } {
+  const { forCount, againstCount, totalVoters, averageStance, agentStances } = tally;
+
+  const outcomeLabel =
+    forCount > againstCount ? "YES / FOR"
+    : againstCount > forCount ? "NO / AGAINST"
+    : "TIE (equal FOR and AGAINST)";
+
+  const margin = Math.abs(forCount - againstCount);
+  const tallyLines = agentStances
+    .map((a) => `  • ${a.agentName}: stance ${a.stance}/6 (${a.stance >= 4 ? "FOR" : "AGAINST"})`)
+    .join("\n");
+
   return {
-    system: `You extract structured verdicts from debate summaries. Return precise JSON matching the schema.`,
+    system: `You extract structured verdicts from Supreme Court debates. The VOTE TALLY below is the authoritative ground truth — your verdict MUST match it exactly. Do not contradict the vote count. Return precise JSON.`,
     user: `Question: "${question}"
 
-Summary: ${summary}
+━━━ AUTHORITATIVE VOTE TALLY (ground truth — overrides all else) ━━━
+Outcome: ${outcomeLabel}
+FOR (stance 4-6): ${forCount} / ${totalVoters} justices
+AGAINST (stance 1-3): ${againstCount} / ${totalVoters} justices
+Margin: ${margin} vote${margin !== 1 ? "s" : ""}
+Average stance: ${averageStance.toFixed(1)} / 6.0
 
-Agent IDs: ${agentIds.join(", ")}
+Individual final stances (what each justice voted in their last round):
+${tallyLines}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Extract: a definitive decision/verdict (2-3 sentences), a confidence score (0-100), and one key argument per agent. Return as JSON.`,
+Debate summary (context only — the tally above is ground truth):
+${summary}
+
+Agent IDs (use these exactly for keyArguments): ${agentStances.map((a) => a.agentId).join(", ")}
+
+RULES — you must follow these:
+1. The verdict MUST reflect the outcome: ${outcomeLabel}.
+2. Confidence is based on the vote margin (${forCount} vs ${againstCount} out of ${totalVoters}).
+3. Extract one key argument per agent from the summary.
+
+Return JSON.`,
   };
 }

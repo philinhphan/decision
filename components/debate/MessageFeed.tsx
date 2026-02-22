@@ -4,15 +4,18 @@ import { useEffect, useRef } from "react";
 import { AnimatePresence } from "framer-motion";
 import { MessageBubble } from "./MessageBubble";
 import type { Agent, Message } from "@/lib/types";
+import type { UseTTS } from "@/hooks/useTTS";
 
 interface MessageFeedProps {
   messages: Message[];
   agents: Agent[];
+  tts: UseTTS;
   activeMessageId?: string;
+  activeMessageIds?: Set<string>;
   activeSearchMessageId?: string;
 }
 
-export function MessageFeed({ messages, agents, activeMessageId, activeSearchMessageId }: MessageFeedProps) {
+export function MessageFeed({ messages, agents, tts, activeMessageId, activeMessageIds, activeSearchMessageId }: MessageFeedProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -27,12 +30,16 @@ export function MessageFeed({ messages, agents, activeMessageId, activeSearchMes
         {messages.map((message) => {
           const agent = agentMap[message.agentId];
           if (!agent) return null;
+          const isActive = activeMessageIds
+            ? activeMessageIds.has(message.id)
+            : message.id === activeMessageId;
           return (
             <MessageBubble
               key={message.id}
               message={message}
               agent={agent}
-              isActive={message.id === activeMessageId}
+              tts={tts}
+              isActive={isActive}
               isSearching={message.id === activeSearchMessageId}
             />
           );
