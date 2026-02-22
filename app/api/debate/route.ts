@@ -1,5 +1,5 @@
 import { openai } from "@ai-sdk/openai";
-import { generateObject, streamText, stepCountIs } from "ai";
+import { generateObject, streamText } from "ai";
 import { nanoid } from "nanoid";
 import { generateAgents } from "@/lib/agent-generator";
 import {
@@ -9,7 +9,7 @@ import {
   DecisionOutputSchema,
 } from "@/lib/prompts";
 import type { Agent, AgentSpec, Message, SSEEvent } from "@/lib/types";
-import { webSearchTool } from "@/lib/tools";
+import { performWebSearch } from "@/lib/tools";
 
 export const maxDuration = 300;
 
@@ -40,10 +40,15 @@ export async function POST(req: Request) {
         const agents: Agent[] = await generateAgents(question, agentSpecs);
         send({ type: "agents_ready", agents });
 
+        // Step 2: Single upfront web search shared across all agents
+        send({ type: "search_start", query: question });
+        const webContext = await performWebSearch(question);
+        send({ type: "search_done" });
+
         const totalRounds = 8;
         const allMessages: Message[] = [];
 
-        // Step 2: Run debate rounds
+        // Step 3: Run debate rounds
         for (let round = 1; round <= totalRounds; round++) {
           send({ type: "round_start", round, totalRounds });
 
@@ -76,7 +81,8 @@ export async function POST(req: Request) {
               round,
               totalRounds,
               priorMessages,
-              lastMsg
+              lastMsg,
+              webContext
             );
 
             let content = "";
@@ -87,20 +93,11 @@ export async function POST(req: Request) {
               prompt: user,
               maxOutputTokens: 80,
               temperature: 0.85,
-              tools: { webSearch: webSearchTool },
-              stopWhen: stepCountIs(5),
             });
 
-            for await (const chunk of result.fullStream) {
-              if (chunk.type === "text-delta") {
-                content += chunk.text;
-                send({ type: "agent_token", agentId: agent.id, messageId, token: chunk.text });
-              } else if (chunk.type === "tool-call") {
-                const query = (chunk.input as { query: string }).query ?? "";
-                send({ type: "agent_search_start", agentId: agent.id, messageId, query });
-              } else if (chunk.type === "tool-result") {
-                send({ type: "agent_search_done", agentId: agent.id, messageId });
-              }
+            for await (const chunk of result.textStream) {
+              content += chunk;
+              send({ type: "agent_token", agentId: agent.id, messageId, token: chunk });
             }
 
             allMessages.push({
@@ -115,7 +112,7 @@ export async function POST(req: Request) {
           }
         }
 
-        // Step 3: Stream summary
+        // Step 4: Stream summary
         const summaryContext = allMessages.map((m) => {
           const agent = agents.find((a) => a.id === m.agentId);
           return {
@@ -146,7 +143,7 @@ export async function POST(req: Request) {
 
         send({ type: "summary_done" });
 
-        // Step 4: Generate structured decision
+        // Step 5: Generate structured decision
         const { system: decSystem, user: decUser } = buildDecisionPrompt(
           question,
           summaryText,

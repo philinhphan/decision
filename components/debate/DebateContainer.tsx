@@ -45,6 +45,11 @@ export function DebateContainer({ state, onReset }: DebateContainerProps) {
         </button>
       </div>
 
+      {/* Web search indicator */}
+      {status === "searching" && (
+        <p className="text-xs text-gray-500 animate-pulse">Searching the web…</p>
+      )}
+
       {/* Round progress */}
       {(status === "debating" || status === "summarizing" || status === "done") && (
         <RoundIndicator
