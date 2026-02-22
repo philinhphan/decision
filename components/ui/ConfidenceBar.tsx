@@ -19,10 +19,10 @@ export function ConfidenceBar({ value }: ConfidenceBarProps) {
   return (
     <div className="space-y-2">
       <div className="flex justify-between items-center text-sm">
-        <span className="text-gray-400">{label}</span>
-        <span className="text-white font-semibold">{value}%</span>
+        <span className="text-gray-500">{label}</span>
+        <span className="text-black font-semibold">{value}%</span>
       </div>
-      <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
+      <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
         <motion.div
           className={`h-full rounded-full ${color}`}
           initial={{ width: 0 }}

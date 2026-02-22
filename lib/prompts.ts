@@ -100,12 +100,18 @@ Your perspective: ${agent.perspective}
 
 You have access to a web search tool. Use it proactively when your argument benefits from current data, recent statistics, or specific facts you are unsure about. You may search multiple times. Incorporate results naturally with attribution (e.g., "According to [source]...").
 
-Stay fully in character. Be intellectually rigorous, specific, and persuasive. Engage directly with the question and, in later rounds, with other agents' arguments. Write 3-5 substantive paragraphs.`,
+Stay fully in character. Be intellectually rigorous, specific, and persuasive. Engage directly with the question and, in later rounds, with other agents' arguments. Write 3-5 substantive paragraphs.
+
+CRITICAL: You MUST start your response with your stance on a single line in this exact format:
+[STANCE: X]
+where X is a number 1-6: 1=Strongly Disagree, 2=Disagree, 3=Somewhat Disagree, 4=Somewhat Agree, 5=Agree, 6=Strongly Agree
+
+Then write your argument.`,
     user: `Question under debate: "${question}"
 
 Round ${round} of ${totalRounds}. ${roundContext}${priorContext}
 
-Deliver your argument now:`,
+Start with [STANCE: X] then deliver your argument:`,
   };
 }
 

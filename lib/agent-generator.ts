@@ -1,4 +1,4 @@
-import { openai } from "@ai-sdk/openai";
+import { model } from "@/lib/ai";
 import { generateObject } from "ai";
 import { nanoid } from "nanoid";
 import { AgentSchema, AgentsOutputSchema, buildAgentGeneratorPrompt, getAgentCountHeuristic } from "./prompts";
@@ -16,7 +16,7 @@ export async function generateAgents(
   const { system, user } = buildAgentGeneratorPrompt(question, count, agentSpecs);
 
   const result = await generateObject({
-    model: openai("gpt-4o-mini"),
+    model,
     system,
     prompt: user,
     schema: z.object({
@@ -31,7 +31,6 @@ export async function generateAgents(
         })
       ),
     }),
-    temperature: 0.9,
   });
 
   return result.object.agents.map((agent, i) => ({
