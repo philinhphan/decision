@@ -1,4 +1,3 @@
-import { PDFParse } from "pdf-parse";
 import { openai } from "@ai-sdk/openai";
 import { generateText } from "ai";
 
@@ -35,11 +34,11 @@ async function parseTextFile(buffer: Buffer, fileName: string): Promise<string> 
 }
 
 async function parsePdf(buffer: Buffer): Promise<string> {
-    const parser = new PDFParse({ data: buffer });
-    const result = await parser.getText();
-    const text = result.text ?? "";
-    await parser.destroy();
-    return truncate(text.trim());
+    // Lazy require to avoid pdf-parse v1 bug: it tries to read a test PDF on module init
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const pdfParse = require("pdf-parse");
+    const data = await pdfParse(buffer);
+    return truncate((data.text || "").trim());
 }
 
 async function parseImage(buffer: Buffer, mimeType: string, fileName: string): Promise<string> {
