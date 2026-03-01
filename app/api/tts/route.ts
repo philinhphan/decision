@@ -1,6 +1,17 @@
-import { getElevenLabsApiKey, getElevenLabsVoiceIds } from "@/lib/voices";
+import {
+  elevenLabsVoiceIndex,
+  getElevenLabsApiKey,
+  getElevenLabsVoiceIds,
+  pickOpenAIVoiceForIndex,
+} from "@/lib/voices";
 
 export const runtime = "nodejs";
+
+// OpenAI voices — kept in sync with voices.ts OPENAI_VOICES
+const OPENAI_VOICE_SET = new Set([
+  "marin", "cedar", "alloy", "ash", "ballad", "coral",
+  "echo", "fable", "nova", "onyx", "sage", "shimmer", "verse",
+]);
 
 type CacheEntry = { bytes: ArrayBuffer; createdAt: number };
 
@@ -8,8 +19,8 @@ const CACHE_TTL_MS = 1000 * 60 * 60; // 1 hour
 const MAX_CACHE_ENTRIES = 200;
 const cache = new Map<string, CacheEntry>();
 
-function makeCacheKey(voiceId: string, text: string): string {
-  return `${voiceId}\n${text}`;
+function makeCacheKey(voice: string, text: string): string {
+  return `${voice}\n${text}`;
 }
 
 function pruneCache() {
@@ -27,7 +38,7 @@ function pruneCache() {
 function normalizeSpokenText(text: string): string {
   return text
     .replace(/\s+/g, " ")
-    .replace(/^[\s"“”'‘’]+|[\s"“”'‘’]+$/g, "")
+    .replace(/^[\s"""''']+|[\s"""''']+$/g, "")
     .trim();
 }
 
@@ -53,12 +64,76 @@ function isSpeakableText(text: string): boolean {
   return true;
 }
 
-export async function POST(req: Request) {
-  const apiKey = getElevenLabsApiKey();
+function audioResponse(buffer: ArrayBuffer): Response {
+  return new Response(buffer, {
+    headers: {
+      "Content-Type": "audio/mpeg",
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
+async function callOpenAITTS(
+  text: string,
+  voice: string
+): Promise<{ ok: true; buffer: ArrayBuffer } | { ok: false; status: number; detail: string }> {
+  const apiKey = process.env.OPENAI_API_KEY ?? "";
   if (!apiKey) {
-    return Response.json({ error: "Missing ELEVENLABS_API_KEY" }, { status: 500 });
+    return { ok: false, status: 500, detail: "OPENAI_API_KEY not set" };
   }
 
+  const res = await fetch("https://api.openai.com/v1/audio/speech", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ model: "gpt-4o-mini-tts", voice, input: text }),
+  });
+
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    return { ok: false, status: res.status, detail: detail.slice(0, 500) };
+  }
+
+  return { ok: true, buffer: await res.arrayBuffer() };
+}
+
+async function callElevenLabs(
+  text: string,
+  voiceId: string,
+  apiKey: string
+): Promise<{ ok: true; buffer: ArrayBuffer } | { ok: false; status: number; detail: string }> {
+  const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Accept: "audio/mpeg",
+      "Content-Type": "application/json",
+      "xi-api-key": apiKey,
+    },
+    body: JSON.stringify({
+      text,
+      model_id: "eleven_multilingual_v2",
+      voice_settings: {
+        stability: 0.4,
+        similarity_boost: 0.8,
+        style: 0.0,
+        use_speaker_boost: true,
+        speed: 1.15,
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    return { ok: false, status: res.status, detail: detail.slice(0, 500) };
+  }
+
+  return { ok: true, buffer: await res.arrayBuffer() };
+}
+
+export async function POST(req: Request) {
   let payload: unknown;
   try {
     payload = await req.json();
@@ -77,77 +152,52 @@ export async function POST(req: Request) {
     return Response.json({ error: "text is too short/invalid for speech" }, { status: 400 });
   }
 
-  const allowedVoices = getElevenLabsVoiceIds();
-  const resolvedVoiceId = cleanVoiceId || allowedVoices[0] || "";
-  const strictAllowlist =
-    (process.env.ELEVENLABS_STRICT_VOICE_ALLOWLIST ?? "").toLowerCase() === "true" ||
-    process.env.ELEVENLABS_STRICT_VOICE_ALLOWLIST === "1";
+  // Determine which provider + voice to use.
+  // If voiceId is already an OpenAI voice name → use OpenAI directly.
+  // If voiceId looks like an ElevenLabs ID and the key+IDs are configured → use ElevenLabs.
+  // Everything else falls through to OpenAI with an index-mapped voice.
+  const isOpenAIVoice = OPENAI_VOICE_SET.has(cleanVoiceId);
+  const elevenKey = getElevenLabsApiKey();
+  const allowedEleven = getElevenLabsVoiceIds();
+  const isElevenVoice =
+    !isOpenAIVoice &&
+    !!elevenKey &&
+    allowedEleven.length > 0 &&
+    (allowedEleven.includes(cleanVoiceId) || cleanVoiceId === "");
 
-  if (!resolvedVoiceId) {
-    return Response.json(
-      { error: "voiceId is required (or set ELEVENLABS_VOICE_IDS)" },
-      { status: 400 }
-    );
-  }
-
-  if (strictAllowlist && allowedVoices.length > 0 && !allowedVoices.includes(resolvedVoiceId)) {
-    return Response.json(
-      { error: "voiceId is not in ELEVENLABS_VOICE_IDS allowlist" },
-      { status: 400 }
-    );
-  }
+  // Resolve the effective voice label for caching
+  const resolvedOpenAIVoice = isOpenAIVoice
+    ? cleanVoiceId
+    : pickOpenAIVoiceForIndex(elevenLabsVoiceIndex(cleanVoiceId));
+  const cacheVoice = isElevenVoice ? cleanVoiceId : resolvedOpenAIVoice;
 
   pruneCache();
-  const cacheKey = makeCacheKey(resolvedVoiceId, cleanText);
+  const cacheKey = makeCacheKey(cacheVoice, cleanText);
   const cached = cache.get(cacheKey);
   if (cached) {
-    return new Response(cached.bytes, {
-      headers: {
-        "Content-Type": "audio/mpeg",
-        "Cache-Control": "no-store",
-      },
-    });
+    return audioResponse(cached.bytes);
   }
 
-  const elevenUrl = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(
-    resolvedVoiceId
-  )}?output_format=mp3_44100_128`;
-
-  const elevenRes = await fetch(elevenUrl, {
-    method: "POST",
-    headers: {
-      Accept: "audio/mpeg",
-      "Content-Type": "application/json",
-      "xi-api-key": apiKey,
-    },
-    body: JSON.stringify({
-      text: cleanText,
-      model_id: "eleven_multilingual_v2",
-      voice_settings: {
-        stability: 0.4,
-        similarity_boost: 0.8,
-        style: 0.0,
-        use_speaker_boost: true,
-        speed: 1.15,
-      },
-    }),
-  });
-
-  if (!elevenRes.ok) {
-    const errText = await elevenRes.text().catch(() => "");
-    return Response.json(
-      { error: "ElevenLabs request failed", status: elevenRes.status, detail: errText.slice(0, 500) },
-      { status: 502 }
-    );
+  // ElevenLabs path (opt-in via configured key + voice IDs)
+  if (isElevenVoice) {
+    const resolvedEleven = cleanVoiceId || allowedEleven[0];
+    const result = await callElevenLabs(cleanText, resolvedEleven, elevenKey);
+    if (result.ok) {
+      cache.set(cacheKey, { bytes: result.buffer, createdAt: Date.now() });
+      return audioResponse(result.buffer);
+    }
+    console.warn(`[TTS] ElevenLabs failed (${result.status}): ${result.detail} — falling back to OpenAI TTS`);
   }
 
-  const buffer = await elevenRes.arrayBuffer();
-  cache.set(cacheKey, { bytes: buffer, createdAt: Date.now() });
+  // Default: OpenAI TTS
+  const openAIResult = await callOpenAITTS(cleanText, resolvedOpenAIVoice);
+  if (openAIResult.ok) {
+    cache.set(cacheKey, { bytes: openAIResult.buffer, createdAt: Date.now() });
+    return audioResponse(openAIResult.buffer);
+  }
 
-  return new Response(buffer, {
-    headers: {
-      "Content-Type": "audio/mpeg",
-      "Cache-Control": "no-store",
-    },
-  });
+  return Response.json(
+    { error: "TTS unavailable", detail: openAIResult.detail },
+    { status: 502 }
+  );
 }
